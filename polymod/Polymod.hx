@@ -681,6 +681,7 @@ class Polymod
 		#end
 	}
 
+	#if !heaps
 	/**
 	 * Get a list of all the available scripted classes (`.hxc` files), interpret them asynchronously, and register any classes.
 	 * Called on platforms that don't support synchronous file access.
@@ -703,6 +704,12 @@ class Polymod
 		Polymod.warning(SCRIPT_HSCRIPT_NOT_INSTALLED, "Cannot register script classes, HScript is not available.");
 		#end
 	}
+	#else
+	public static function registerAllScriptClassesAsync():Void
+	{
+		throw 'Not implemented';
+	}
+	#end
 
 	public static function error(code:PolymodErrorCode, message:String, origin:PolymodErrorOrigin = UNKNOWN):Void
 	{

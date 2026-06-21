@@ -747,6 +747,11 @@ class HScriptedClassMacro
 					}
 				}
 
+				if (field.params.length > 0)
+				{
+					return [];
+				}
+
 				var func_inputArgs:Array<FunctionArg> = [];
 
 				// We only get limited information about the args from Type, we need to use TypedExprDef.

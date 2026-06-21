@@ -109,6 +109,7 @@ class PolymodScriptClass
 		}
 	}
 
+	#if !heaps
 	static function registerScriptClassByPathAsync(path:String):Bool
 	{
 		@:privateAccess {
@@ -150,6 +151,7 @@ class PolymodScriptClass
 			return promise.future.result();
 		}
 	}
+	#end
 
 	/**
 	 * Returns a list of all registered classes.

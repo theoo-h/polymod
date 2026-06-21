@@ -1,7 +1,6 @@
 package polymod.backends;
 
 import haxe.io.Bytes;
-import openfl.display3D.IndexBuffer3D;
 import polymod.backends.IBackend;
 import polymod.backends.PolymodAssets.PolymodAssetType;
 import polymod.format.ParseRules;
@@ -258,6 +257,7 @@ class PolymodAssetLibrary
 	public function check(id:String, type:PolymodAssetType = null)
 	{
 		var exists = _checkExists(id);
+
 		if (exists && type != null && type != PolymodAssetType.BYTES)
 		{
 			var otherType = this.type.get(id);
@@ -303,6 +303,7 @@ class PolymodAssetLibrary
 	public function file(id:String, theDir:String = ''):String
 	{
 		var idStripped = stripAssetsPrefix(id);
+
 		if (theDir != '')
 		{
 			if (idStripped.startsWith(theDir)) return idStripped;
@@ -333,6 +334,7 @@ class PolymodAssetLibrary
 				// If we have an asset prefix
 
 				var filePath = Util.pathJoin(modDir, idStripped);
+
 				if (fileSystem.exists(filePath))
 					result = filePath;
 			}
@@ -364,6 +366,7 @@ class PolymodAssetLibrary
 		if (ignoredFiles.length > 0 && ignoredFiles.indexOf(id) != -1)
 			return false;
 		id = stripAssetsPrefix(id);
+
 		for (d in dirs)
 		{
 			#if firetongue

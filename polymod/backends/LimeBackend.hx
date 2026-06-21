@@ -1,6 +1,5 @@
 package polymod.backends;
 
-import lime.system.ThreadPool;
 import polymod.backends.PolymodAssetLibrary;
 import polymod.backends.PolymodAssets.PolymodAssetType;
 import polymod.fs.PolymodFileSystem;
@@ -14,6 +13,7 @@ using StringTools;
 import unifill.Unifill;
 #end
 #if (lime && !nme && !macro)
+import lime.system.ThreadPool;
 import lime.app.Future;
 import lime.graphics.Image;
 import lime.net.HTTPRequest;

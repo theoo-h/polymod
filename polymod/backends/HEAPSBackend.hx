@@ -1,13 +1,18 @@
 package polymod.backends;
 
+import haxe.exceptions.NotImplementedException;
+import hxd.File;
 import haxe.io.Bytes;
 import haxe.xml.Fast;
 import haxe.xml.Printer;
 import polymod.Polymod;
 import polymod.Polymod.PolymodError;
+import polymod.Polymod.FrameworkParams;
 import polymod.util.Util;
 import polymod.backends.PolymodAssetLibrary;
 import polymod.backends.PolymodAssets.PolymodAssetType;
+using StringTools;
+
 #if unifill
 import unifill.Unifill;
 #end
@@ -34,7 +39,6 @@ class HEAPSBackend extends StubBackend
 #else
 class HEAPSBackend implements IBackend
 {
-	// STATIC:
 	public static var defaultLoader:Loader = null;
 
 	private static function getDefaultLoader()
@@ -58,10 +62,11 @@ class HEAPSBackend implements IBackend
 		}
 	}
 
-	// Instance:
 	public var polymodLibrary:PolymodAssetLibrary;
 	public var modLoader(default, null):HEAPSModLoader;
 	public var fallback(default, null):Loader;
+
+	var fallbackFileList:Array<String>;
 
 	public function new()
 	{
@@ -72,15 +77,31 @@ class HEAPSBackend implements IBackend
 		fallback = getDefaultLoader();
 		modLoader = new HEAPSModLoader(this);
 		Res.loader = modLoader;
+
+		fallbackFileList = buildFallbackFileList();
+
 		return true;
 	}
 
 	public function destroy()
 	{
+		if (modLoader != null)
+		{
+			modLoader.cleanCache();
+			modLoader.destroy();
+		}
+
+		if (defaultLoader != null)
+		{
+			// clear fallback ig
+			defaultLoader.cleanCache();
+		}
+
 		restoreDefaultLoader();
-		modLoader.destroy();
+
 		modLoader = null;
 		fallback = null;
+		fallbackFileList = null;
 		polymodLibrary = null;
 	}
 
@@ -99,18 +120,125 @@ class HEAPSBackend implements IBackend
 		return modLoader.loadText(id).toText();
 	}
 
-	public function list(type:PolymodAssetType = null):Array<String>
-	{
-		throw 'Function not implemented';
-	}
-
 	public function getPath(id:String):String
 	{
-		throw 'Function not implemented';
+		var p = polymodLibrary;
+
+		if (p.check(id))
+		{
+			var modPath = p.file(id);
+			if (modPath != null && modPath != '')
+				return modPath;
+		}
+
+		return id;
+	}
+
+	public function list(type:PolymodAssetType = null):Array<String>
+	{
+		var p = polymodLibrary;
+		var items:Array<String> = [];
+
+		var addItem = (path:String) ->
+		{
+			if (items.indexOf(path) == -1)
+			{
+				items.push(path);
+			}
+		};
+
+		var modFiles = (p.typeLibraries != null) ? p.typeLibraries.get('default') : null;
+		if (modFiles != null)
+		{
+			for (id in modFiles)
+			{
+				if (id.startsWith(PolymodConfig.appendFolder) || id.startsWith(PolymodConfig.mergeFolder))
+					continue;
+				
+				if (type == null || p.check(id, type))
+				{
+					addItem(id);
+				}
+			}
+		}
+
+		// base
+		if (fallbackFileList != null)
+		{
+			for (id in fallbackFileList)
+			{
+				if (type != null && type != PolymodAssetType.BYTES)
+				{
+					var ext = '';
+					var doti = Util.uLastIndexOf(id, '.');
+					if (doti != -1)
+						ext = id.substring(doti + 1);
+
+					var assetType = p.getExtensionType(ext);
+					if (assetType != type && assetType != PolymodAssetType.BYTES)
+						continue;
+				}
+
+				addItem(id);
+			}
+		}
+
+		return items;
+	}
+
+	function buildFallbackFileList():Array<String>
+	{
+		var result:Array<String> = [];
+
+		if (fallback == null)
+			return result;
+
+		try
+		{
+			walkFileEntry(fallback.fs.getRoot(), '', result);
+		}
+		catch (e:Dynamic)
+		{
+			if (PolymodConfig.debug)
+				trace('HEAPSBackend: could not enumerate base game assets ($e), falling back to modded assets only.');
+		}
+
+		return result;
+	}
+
+	function walkFileEntry(entry:FileEntry, currentPath:String, result:Array<String>):Void
+	{
+		for (child in entry)
+		{
+			var childPath = (currentPath == '') ? child.name : currentPath + '/' + child.name;
+
+			var isDir = false;
+			try
+			{
+				isDir = child.isDirectory;
+			}
+			catch (e:Dynamic)
+			{
+				isDir = false;
+			}
+
+			if (isDir)
+			{
+				walkFileEntry(child, childPath, result);
+			}
+			else
+			{
+				result.push(childPath);
+			}
+		}
 	}
 
 	public function clearCache()
 	{
+		if (modLoader != null)
+		{
+			modLoader.cleanCache();
+		}
 		if (defaultLoader != null)
 		{
 			defaultLoader.cleanCache();
@@ -167,6 +295,7 @@ class HEAPSModLoader extends Loader
 	private function loadBytes(path:String):Any
 	{
 		var e = p.check(path);
+
 		if (!e && hasFallback)
 		{
 			var result = fallback.load(path);
@@ -177,7 +306,8 @@ class HEAPSModLoader extends Loader
 
 	public function loadText(path:String):Any
 	{
-		var modText = null;
+		var modText:String = null;
+
 		if (p.check(path))
 		{
 			modText = loadBytes(path).toText();
@@ -191,6 +321,12 @@ class HEAPSModLoader extends Loader
 		{
 			modText = p.mergeAndAppendText(path, modText);
 		}
+
+		if (modText == null)
+		{
+			modText = '';
+		}
+
 		return new Any(this, new BytesFileEntry(path, Bytes.ofString(modText)));
 	}
 }
@@ -212,13 +348,30 @@ class ModFileEntry extends BytesFileEntry
 		super(path, bytes);
 	}
 
-	private function isPathADirectory(str:String)
+	public static function tryGetFallbackEntry(loader:Loader, path:String):Null<FileEntry>
+	{
+		if (loader == null)
+			return null;
+
+		try
+		{
+			return loader.fs.get(path);
+		}
+		catch (e:Dynamic)
+		{
+			return null;
+		}
+	}
+
+	private function isPathADirectory(str:String):Bool
 	{
 		if (p.fileSystem.exists(str) && p.fileSystem.isDirectory(str))
 			return true;
-		var entry = b.fallback.fs.get(str);
+
+		var entry = tryGetFallbackEntry(b.fallback, str);
 		if (entry != null && entry.isDirectory)
 			return true;
+
 		return false;
 	}
 
@@ -227,10 +380,13 @@ class ModFileEntry extends BytesFileEntry
 		var arr:Array<FileEntry> = [];
 
 		var otherList = [];
-		var fallbackEntry = b.fallback.fs.get(fullFilePath);
-		for (otherEntry in fallbackEntry.iterator())
+		var fallbackEntry = tryGetFallbackEntry(b.fallback, fullFilePath);
+		if (fallbackEntry != null)
 		{
-			otherList.push(otherEntry);
+			for (otherEntry in fallbackEntry.iterator())
+			{
+				otherList.push(otherEntry);
+			}
 		}
 
 		var isDir = isPathADirectory(path);
@@ -282,12 +438,21 @@ class ModFileEntry extends BytesFileEntry
 	private function resolveBytes()
 	{
 		var file = p.file(path);
-		bytes = p.fileSystem.getFileBytes(file);
-		if (bytes == null)
+
+		if (file != '' && p.fileSystem.exists(file) && !p.fileSystem.isDirectory(file))
 		{
-			var entry = b.fallback.fs.get(path);
-			bytes = entry.getBytes();
+			bytes = p.fileSystem.getFileBytes(file);
+			return;
 		}
+
+		var entry = tryGetFallbackEntry(b.fallback, path);
+		if (entry != null && !entry.isDirectory)
+		{
+			bytes = entry.getBytes();
+			return;
+		}
+
+		bytes = null;
 	}
 
 	override function getSign():Int
@@ -302,16 +467,10 @@ class ModFileEntry extends BytesFileEntry
 		return super.getBytes();
 	}
 
-	override function readByte():Int
+	override function readBytes(out:Bytes, outPos:Int, pos:Int, size:Int)
 	{
 		initBytes();
-		return super.readByte();
-	}
-
-	override function read(out:Bytes, pos:Int, size:Int)
-	{
-		initBytes();
-		return super.read(out, pos, size);
+		return super.readBytes(out, outPos, pos, size);
 	}
 
 	override function loadBitmap(onLoaded:LoadedBitmap->Void):Void
@@ -324,6 +483,12 @@ class ModFileEntry extends BytesFileEntry
 	{
 		initBytes();
 		return super.get_size();
+	}
+
+	override function get_isDirectory():Bool
+	{
+		initBytes();
+		return super.get_isDirectory();
 	}
 }
 
@@ -338,6 +503,11 @@ class ModFileSystem implements FileSystem
 		b = cast p.backend;
 	}
 
+	public function delete(path:String):Bool
+	{
+		throw new NotImplementedException();
+	}
+
 	public function getRoot():FileEntry
 	{
 		return new ModFileEntry('', null, this, '');
@@ -346,14 +516,23 @@ class ModFileSystem implements FileSystem
 	public function get(path:String):FileEntry
 	{
 		var file = p.file(path);
-		var bytes = p.fileSystem.getFileBytes(file);
-		if (bytes == null)
+
+		if (file != '' && p.fileSystem.exists(file) && !p.fileSystem.isDirectory(file))
 		{
-			var entry = b.fallback.fs.get(path);
-			return entry;
+			var bytes = p.fileSystem.getFileBytes(file);
+			if (bytes != null)
+			{
+				return new ModFileEntry(path, bytes, this, path);
+			}
 		}
-		var modEntry = new ModFileEntry(path, bytes, this, path);
-		return modEntry;
+
+		var fallbackEntry = ModFileEntry.tryGetFallbackEntry(b.fallback, path);
+		if (fallbackEntry != null)
+		{
+			return fallbackEntry;
+		}
+
+		return new ModFileEntry(path, null, this, path);
 	}
 
 	public function exists(path:String):Bool
